@@ -161,6 +161,18 @@ You may either alter your environment settings or set the values in file `spec/s
 Make sure you use correct version of Oracle client for database you're connecting to. Otherwise you may encounter TimeZone errors like [this](http://stackoverflow.com/questions/7678485/oracle-ora-01805-on-oracle-11g-database)
 
 
+Make sure to setup the following Oracle-specific environment variables properly
+
+* [NLS_LANG](http://www.orafaq.com/wiki/NLS_LANG) - preferred value `NLS_LANG=AMERICAN_AMERICA.AL32UTF8`
+* [ORA_SDTZ](http://docs.oracle.com/cd/E18283_01/server.112/e10729/ch4datetime.htm#CBBEEAFB) The setting should point a machine timezone like: `ORA_SDTZ=Europe/Riga`, otherwise Oracle by default uses a Fixed-offset timezone (like `03:00`) that is not daylight saving (DST) aware, which will lead to wrong translations of the timestamp values between Ruby code (DTS-aware) and Oracle session (non-DST-aware).
+* [ORACLE_HOME](http://www.orafaq.com/wiki/ORACLE_HOME)
+
+You may either alter your environment settings or set the values in file `spec/support/custom_config.rb`. Sample file `custom_config.rb.sample` shows how to do that.
+
+
+Make sure you use correct version of Oracle client for database you're connecting to. Otherwise you may encounter TimeZone errors like [this](http://stackoverflow.com/questions/7678485/oracle-ora-01805-on-oracle-11g-database)
+
+
 TESTS
 -----
 
