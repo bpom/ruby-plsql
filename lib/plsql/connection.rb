@@ -25,20 +25,20 @@ module PLSQL
 
     def self.create_new(params) #:nodoc:
       conn = case driver_type
-      when :oci
-        OCIConnection.create_raw(params)
-      when :jdbc
-        JDBCConnection.create_raw(params)
-      else
-        raise ArgumentError, "Unknown raw driver"
+             when :oci
+               OCIConnection.create_raw(params)
+             when :jdbc
+               JDBCConnection.create_raw(params)
+             else
+               raise ArgumentError, "Unknown raw driver"
       end
-      conn.set_time_zone(params[:time_zone]||ENV['ORA_SDTZ'])
+      conn.set_time_zone(params[:time_zone] || ENV["ORA_SDTZ"])
       conn
     end
 
     def self.driver_type #:nodoc:
-      # MRI 1.8.6 or YARV 1.9.1
-      @driver_type ||= if (!defined?(RUBY_ENGINE) || RUBY_ENGINE == "ruby") && defined?(OCI8)
+      # MRI 1.8.6 or YARV 1.9.1 or TruffleRuby
+      @driver_type ||= if (!defined?(RUBY_ENGINE) || RUBY_ENGINE == "ruby" || RUBY_ENGINE == "truffleruby") && defined?(OCI8)
         :oci
       # JRuby
       elsif (defined?(RUBY_ENGINE) && RUBY_ENGINE == "jruby")
@@ -66,7 +66,7 @@ module PLSQL
     def jdbc?
       @raw_driver == :jdbc
     end
-    
+
     def logoff #:nodoc:
       # Rollback any uncommited transactions
       rollback
@@ -99,14 +99,14 @@ module PLSQL
     end
 
     def select_first(sql, *bindvars) #:nodoc:
-      cursor = cursor_from_query(sql, bindvars, :prefetch_rows => 1)
+      cursor = cursor_from_query(sql, bindvars, prefetch_rows: 1)
       cursor.fetch
     ensure
       cursor.close rescue nil
     end
 
     def select_hash_first(sql, *bindvars) #:nodoc:
-      cursor = cursor_from_query(sql, bindvars, :prefetch_rows => 1)
+      cursor = cursor_from_query(sql, bindvars, prefetch_rows: 1)
       cursor.fetch_hash
     ensure
       cursor.close rescue nil
@@ -183,7 +183,7 @@ module PLSQL
     # this implementation is overriden in OCI connection with faster native OCI method
     def describe_synonym(schema_name, synonym_name) #:nodoc:
       select_first(
-      "SELECT table_owner, table_name FROM all_synonyms WHERE owner = :owner AND synonym_name = :synonym_name",
+        "SELECT table_owner, table_name FROM all_synonyms WHERE owner = :owner AND synonym_name = :synonym_name",
         schema_name.to_s.upcase, synonym_name.to_s.upcase)
     end
 
@@ -198,7 +198,7 @@ module PLSQL
     end
 
     # Set time zone
-    def set_time_zone(time_zone=nil)
+    def set_time_zone(time_zone = nil)
       exec("alter session set time_zone = '#{time_zone}'") if time_zone
     end
 
@@ -207,12 +207,12 @@ module PLSQL
       select_first("SELECT SESSIONTIMEZONE FROM dual")[0]
     end
 
-    RUBY_TEMP_TABLE_PREFIX = 'ruby_'
+    RUBY_TEMP_TABLE_PREFIX = "ruby_"
 
     # Drop all ruby temporary tables that are used for calling packages with table parameter types defined in packages
     def drop_all_ruby_temporary_tables
       select_all("SELECT table_name FROM user_tables WHERE temporary='Y' AND table_name LIKE :table_name",
-                  RUBY_TEMP_TABLE_PREFIX.upcase+'%').each do |row|
+                  RUBY_TEMP_TABLE_PREFIX.upcase + "%").each do |row|
         exec "TRUNCATE TABLE #{row[0]}"
         exec "DROP TABLE #{row[0]}"
       end
@@ -221,12 +221,10 @@ module PLSQL
     # Drop ruby temporary tables created in current session that are used for calling packages with table parameter types defined in packages
     def drop_session_ruby_temporary_tables
       select_all("SELECT table_name FROM user_tables WHERE temporary='Y' AND table_name LIKE :table_name",
-                  RUBY_TEMP_TABLE_PREFIX.upcase+"#{session_id}_%").each do |row|
+                  RUBY_TEMP_TABLE_PREFIX.upcase + "#{session_id}_%").each do |row|
         exec "TRUNCATE TABLE #{row[0]}"
         exec "DROP TABLE #{row[0]}"
       end
     end
-
   end
-
 end

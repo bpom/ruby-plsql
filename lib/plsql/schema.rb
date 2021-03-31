@@ -13,13 +13,13 @@ module PLSQL
           @@schemas[connection_alias] = self.new
         end
       end
-
     end
 
     def initialize(raw_conn = nil, schema = nil, original_schema = nil) #:nodoc:
       self.connection = raw_conn
       @schema_name = schema ? schema.to_s.upcase : nil
       @original_schema = original_schema
+      @dbms_output_stream = nil
     end
 
     # Returns connection wrapper object (this is not raw OCI8 or JDBC connection!)
@@ -35,7 +35,7 @@ module PLSQL
     end
 
     # Set connection to OCI8 or JDBC connection:
-    # 
+    #
     #   plsql.connection = OCI8.new(database_user, database_password, database_name)
     #
     # or
@@ -90,7 +90,7 @@ module PLSQL
     # Current Oracle schema name
     def schema_name
       return nil unless connection
-      @schema_name ||= select_first("SELECT SYS_CONTEXT('userenv','session_user') FROM dual")[0]
+      @schema_name ||= select_first("SELECT SYS_CONTEXT('userenv','current_schema') FROM dual")[0]
     end
 
     # Default timezone to which database values will be converted - :utc or :local
@@ -131,9 +131,9 @@ module PLSQL
     end
 
     # Seet DBMS_OUTPUT buffer size (default is 20_000). Example:
-    # 
+    #
     #   plsql.dbms_output_buffer_size = 100_000
-    # 
+    #
     def dbms_output_buffer_size=(value)
       @dbms_output_buffer_size = value
     end
@@ -142,9 +142,9 @@ module PLSQL
     DBMS_OUTPUT_MAX_LINES = 2147483647
 
     # Specify IO stream where to log DBMS_OUTPUT from PL/SQL procedures. Example:
-    # 
+    #
     #   plsql.dbms_output_stream = STDOUT
-    # 
+    #
     def dbms_output_stream=(stream)
       @dbms_output_stream = stream
       if @dbms_output_stream.nil? && @connection
@@ -163,118 +163,113 @@ module PLSQL
 
     private
 
-    def reset_instance_variables
-      if @connection
-        @schema_objects = {}
-      else
-        @schema_objects = nil
+      def reset_instance_variables
+        if @connection
+          @schema_objects = {}
+        else
+          @schema_objects = nil
+        end
+        @schema_name = nil
+        @default_timezone = nil
       end
-      @schema_name = nil
-      @default_timezone = nil
-    end
 
-    def method_missing(method, *args, &block)
-      raise ArgumentError, "No database connection" unless connection
-      # search in database if not in cache at first
-      object = (@schema_objects[method] ||= find_database_object(method) || find_other_schema(method) ||
-         find_public_synonym(method) || find_standard_procedure(method))
+      def method_missing(method, *args, &block)
+        raise ArgumentError, "No database connection" unless connection
+        # search in database if not in cache at first
+        object = (@schema_objects[method] ||= find_database_object(method) || find_other_schema(method) ||
+           find_public_synonym(method) || find_standard_procedure(method))
 
-      raise ArgumentError, "No database object '#{method.to_s.upcase}' found" unless object
+        raise ArgumentError, "No database object '#{method.to_s.upcase}' found" unless object
 
-      if object.is_a?(Procedure)
-        object.exec(*args, &block)
-      elsif object.is_a?(Type) && !args.empty?
-        object.new(*args, &block)
-      else
-        object
+        if object.is_a?(Procedure)
+          object.exec(*args, &block)
+        elsif object.is_a?(Type) && !args.empty?
+          object.new(*args, &block)
+        else
+          object
+        end
       end
-    end
 
-    def find_database_object(name, override_schema_name = nil)
-      object_schema_name = override_schema_name || schema_name
-      object_name = name.to_s.upcase
-      if row = select_first(
-          "SELECT o.object_type, o.object_id, o.status,
-          (CASE WHEN o.object_type = 'PACKAGE'
-          THEN (SELECT ob.status FROM all_objects ob
-          WHERE ob.owner = o.owner AND ob.object_name = o.object_name AND ob.object_type = 'PACKAGE BODY')
-          ELSE NULL END) body_status
+      def find_database_object(name, override_schema_name = nil)
+        object_schema_name = override_schema_name || schema_name
+        object_name = name.to_s.upcase
+        if row = select_first(
+          "SELECT o.object_type, o.object_id
           FROM all_objects o
           WHERE owner = :owner AND object_name = :object_name
           AND object_type IN ('PROCEDURE','FUNCTION','PACKAGE','TABLE','VIEW','SEQUENCE','TYPE','SYNONYM')",
-          object_schema_name, object_name)
-        object_type, object_id, status, body_status = row
-        raise ArgumentError, "Database object '#{object_schema_name}.#{object_name}' is not in valid status\n#{
-          _errors(object_schema_name, object_name, object_type)}" if status == 'INVALID'
-        raise ArgumentError, "Package '#{object_schema_name}.#{object_name}' body is not in valid status\n#{
-          _errors(object_schema_name, object_name, 'PACKAGE BODY')}" if body_status == 'INVALID'
-        case object_type
-        when 'PROCEDURE', 'FUNCTION'
-          if (connection.database_version <=> [11, 1, 0, 0]) >= 0
-            row = select_first(
-              "SELECT p.object_id FROM all_procedures p
-               WHERE p.owner = :owner
-                 AND p.object_name = :object_name
-                 AND p.object_type = :object_type",
-               object_schema_name, object_name, object_type)
-            object_id = row[0]
+            object_schema_name, object_name)
+          object_type, object_id = row
+          case object_type
+          when "PROCEDURE", "FUNCTION"
+            if (connection.database_version <=> [11, 1, 0, 0]) >= 0
+              if row = select_first(
+                "SELECT p.object_id FROM all_procedures p
+                 WHERE p.owner = :owner
+                   AND p.object_name = :object_name
+                   AND p.object_type = :object_type",
+                   object_schema_name, object_name, object_type)
+                object_id = row[0]
+              else
+                raise ArgumentError, "Database object '#{object_schema_name}.#{object_name}' is not in valid status\n#{
+                  _errors(object_schema_name, object_name, object_type)}"
+              end
+            end
+            Procedure.new(self, name, nil, override_schema_name, object_id)
+          when "PACKAGE"
+            Package.new(self, name, override_schema_name)
+          when "TABLE"
+            Table.new(self, name, override_schema_name)
+          when "VIEW"
+            View.new(self, name, override_schema_name)
+          when "SEQUENCE"
+            Sequence.new(self, name, override_schema_name)
+          when "TYPE"
+            Type.new(self, name, override_schema_name)
+          when "SYNONYM"
+            target_schema_name, target_object_name = @connection.describe_synonym(object_schema_name, object_name)
+            find_database_object(target_object_name, target_schema_name)
           end
-          Procedure.new(self, name, nil, override_schema_name, object_id)
-        when 'PACKAGE'
-          Package.new(self, name, override_schema_name)
-        when 'TABLE'
-          Table.new(self, name, override_schema_name)
-        when 'VIEW'
-          View.new(self, name, override_schema_name)
-        when 'SEQUENCE'
-          Sequence.new(self, name, override_schema_name)
-        when 'TYPE'
-          Type.new(self, name, override_schema_name)
-        when 'SYNONYM'
-          target_schema_name, target_object_name = @connection.describe_synonym(object_schema_name, object_name)
-          find_database_object(target_object_name, target_schema_name)
         end
       end
-    end
 
-    def _errors(object_schema_name, object_name, object_type)
-      result = ""
-      previous_line = 0
-      select_all(
-        "SELECT e.line, e.position, e.text error_text, s.text source_text
-        FROM all_errors e, all_source s
-        WHERE e.owner = :owner AND e.name = :name AND e.type = :type
-          AND s.owner = e.owner AND s.name = e.name AND s.type = e.type AND s.line = e.line
-        ORDER BY e.sequence",
-        object_schema_name, object_name, object_type
-      ).each do |line, position, error_text, source_text|
-        result << "Error on line #{'%4d' % line}: #{source_text}" if line > previous_line
-        result << "     position #{'%4d' % position}: #{error_text}\n"
-        previous_line = line
+      def _errors(object_schema_name, object_name, object_type)
+        result = ""
+        previous_line = 0
+        select_all(
+          "SELECT e.line, e.position, e.text error_text, s.text source_text
+          FROM all_errors e, all_source s
+          WHERE e.owner = :owner AND e.name = :name AND e.type = :type
+            AND s.owner = e.owner AND s.name = e.name AND s.type = e.type AND s.line = e.line
+          ORDER BY e.sequence",
+          object_schema_name, object_name, object_type
+        ).each do |line, position, error_text, source_text|
+          result << "Error on line #{'%4d' % line}: #{source_text}" if line > previous_line
+          result << "     position #{'%4d' % position}: #{error_text}\n"
+          previous_line = line
+        end
+        result unless result.empty?
       end
-      result unless result.empty?
-    end
 
-    def find_other_schema(name)
-      return nil if @original_schema
-      if select_first("SELECT username FROM all_users WHERE username = :username", name.to_s.upcase)
-        Schema.new(connection, name, self)
-      else
-        nil
+      def find_other_schema(name)
+        return nil if @original_schema
+        if select_first("SELECT username FROM all_users WHERE username = :username", name.to_s.upcase)
+          Schema.new(connection, name, self)
+        else
+          nil
+        end
       end
-    end
 
-    def find_standard_procedure(name)
-      return nil if @original_schema
-      Procedure.find(self, name, 'STANDARD', 'SYS')
-    end
+      def find_standard_procedure(name)
+        return nil if @original_schema
+        Procedure.find(self, name, "STANDARD", "SYS")
+      end
 
-    def find_public_synonym(name)
-      return nil if @original_schema
-      target_schema_name, target_object_name = @connection.describe_synonym('PUBLIC', name)
-      find_database_object(target_object_name, target_schema_name) if target_schema_name
-    end
-
+      def find_public_synonym(name)
+        return nil if @original_schema
+        target_schema_name, target_object_name = @connection.describe_synonym("PUBLIC", name)
+        find_database_object(target_object_name, target_schema_name) if target_schema_name
+      end
   end
 end
 

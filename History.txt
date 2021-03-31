@@ -1,5 +1,54 @@
+== 0.7.1 2018-09-03
+* Fix
+  * Address incorrect versions in Gemfile 
+
+== 0.7.0 2018-09-03
+* Improvements and fixes
+
+  * Support Rails 5.0, 5.1 and 5.2
+  * Drop Rails 4.1 and 4.2 support
+  * Drop JRuby 1.7 support
+  * Drop JRuby 9.0 support
+  * Drop CRuby 2.1 or lower support
+  * Allow calling procedures in INVALID status
+  * Bignum, Fixnum, Integer fixes for Ruby 2.4
+  * Replace deprecated BigDecimal.new() with BigDecimal()
+  * Suppress warning `BigDecimal.new` is deprecated
+  * Avoid using `OCI8#describe_synonym`
+  * Allow ojdbc7.jar when Java version is 1.7 or higher
+  * Fix unguarded OCIError (breaks on JRuby)
+  * Suppress `warning: instance variable @dbms_output_stream not initialized`
+  * Suppress `warning: assigned but unused variable`
+  * Suppress `warning: shadowing outer local variable - column`
+  * Add license to gemspec
+  * Migrate from jeweler to juwelier
+  * CI against JRuby 9.1.8 and CRuby 2.4 and 2.5
+  * CI against jruby-head and ruby-head
+  * Enable RuboCop
+  * Set `disk_asynch_io` to `false`
+  * Skip XMLType specs if Oracle Database version is 12c or higher
+
+== 0.6.0 2016-03-13
+* Improvements
+  * Add support for records with boolean attributes - as input and output parameters and as return values of stored procedures
+  * Add support for VARCHAR, SIMPLE_INTEGER+subtypes
+  * Accessing to package objects via #[]
+  * Add XMLTYPE support for procedures and functions
+  * New procedure argument metadata option 'defaulted'
+  * Use current_schema in PLSQL::Schema#schema_name
+  * Add support for ruby-oci8 ~> 2.1 (was ~> 2.1.2) - as ruby-oci8 2.2.x is already available
+  * Add support for Oracle enhanced adapter 1.6.x
 * Bug fixes
-  * Support for Session timezone from ENV['TZ'] removed, due to time zone name discrepancies on Windows
+  * Time-zone configuration support fixes and improvements. Support for Session timezone from ENV['TZ'] removed
+  * Fix thread safety problem in PLSQL::OCIConnection::Cursor
+  * Fix: JRuby PLS_INTEGER, BINARY_INTEGER NULL value becomes 0
+* Internal (development) improvements
+  * Travis CI setup for the project
+  * Allow reporting of Unit Tests on Jenkins CI with "RspecJunitFormatter"
+  * Vagrant box CentOS version updated to v7.2
+  * Unit tests setup/teardown fixes for procedure_spec
+* Documentation
+  * Add reference to ruby-plsql cheat sheet
 
 == 0.5.3 2015-05-07
 
